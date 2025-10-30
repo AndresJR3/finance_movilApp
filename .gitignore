@@ -26,3 +26,6 @@ android/.gradle/
 # Logs
 npm-debug.log*
 yarn-debug.log*
+
+.gitignore
+finanzas-app/.git
