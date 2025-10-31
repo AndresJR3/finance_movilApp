@@ -1,6 +1,4 @@
-// ========================================
-// PASO 1: Crear screens/AuthScreen.js
-// ========================================
+// app/auth/login.tsx
 import React, { useState } from 'react';
 import {
   View,
@@ -14,9 +12,9 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../lib/supabase';
+import { supabase } from '@/lib/supabase';
 
-export default function AuthScreen({ onAuthSuccess }) {
+export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -37,8 +35,7 @@ export default function AuthScreen({ onAuthSuccess }) {
 
     try {
       if (isSignUp) {
-        // Registro
-        const { data, error } = await supabase.auth.signUp({
+        const { error } = await supabase.auth.signUp({
           email,
           password,
         });
@@ -47,22 +44,18 @@ export default function AuthScreen({ onAuthSuccess }) {
 
         Alert.alert(
           '¡Registro exitoso!',
-          'Revisa tu email para confirmar tu cuenta',
+          'Revisa tu email para confirmar tu cuenta. Mientras tanto, puedes iniciar sesión.',
           [{ text: 'OK', onPress: () => setIsSignUp(false) }]
         );
       } else {
-        // Login
-        const { data, error } = await supabase.auth.signInWithPassword({
+        const { error } = await supabase.auth.signInWithPassword({
           email,
           password,
         });
 
         if (error) throw error;
-
-        // El onAuthSuccess se llama automáticamente por el listener
-        Alert.alert('¡Bienvenido!', 'Inicio de sesión exitoso');
       }
-    } catch (error) {
+    } catch (error: any) {
       Alert.alert('Error', error.message);
     } finally {
       setLoading(false);
@@ -75,7 +68,6 @@ export default function AuthScreen({ onAuthSuccess }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.content}>
-        {/* Logo */}
         <View style={styles.logoContainer}>
           <Ionicons name="cash-outline" size={80} color="#10b981" />
           <Text style={styles.title}>FinanzasApp</Text>
@@ -84,7 +76,6 @@ export default function AuthScreen({ onAuthSuccess }) {
           </Text>
         </View>
 
-        {/* Formulario */}
         <View style={styles.form}>
           <TextInput
             style={styles.input}
@@ -98,7 +89,7 @@ export default function AuthScreen({ onAuthSuccess }) {
           />
           <TextInput
             style={styles.input}
-            placeholder="Contraseña"
+            placeholder="Contraseña (mínimo 6 caracteres)"
             placeholderTextColor="#9ca3af"
             value={password}
             onChangeText={setPassword}
@@ -106,7 +97,6 @@ export default function AuthScreen({ onAuthSuccess }) {
             autoComplete="password"
           />
 
-          {/* Botón principal */}
           <TouchableOpacity
             style={[styles.button, loading && styles.buttonDisabled]}
             onPress={handleAuth}
@@ -121,7 +111,6 @@ export default function AuthScreen({ onAuthSuccess }) {
             )}
           </TouchableOpacity>
 
-          {/* Toggle Sign Up / Login */}
           <TouchableOpacity
             style={styles.toggleButton}
             onPress={() => setIsSignUp(!isSignUp)}
@@ -139,68 +128,16 @@ export default function AuthScreen({ onAuthSuccess }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#111827',
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: 48,
-  },
-  title: {
-    fontSize: 40,
-    fontWeight: 'bold',
-    color: '#10b981',
-    marginTop: 16,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#9ca3af',
-    marginTop: 8,
-  },
-  form: {
-    gap: 16,
-  },
-  input: {
-    backgroundColor: '#1f2937',
-    borderWidth: 1,
-    borderColor: '#374151',
-    borderRadius: 12,
-    padding: 16,
-    color: '#fff',
-    fontSize: 16,
-  },
-  button: {
-    backgroundColor: '#10b981',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  toggleButton: {
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  toggleText: {
-    color: '#10b981',
-    fontSize: 14,
-  },
+  container: { flex: 1, backgroundColor: '#111827' },
+  content: { flex: 1, justifyContent: 'center', padding: 20 },
+  logoContainer: { alignItems: 'center', marginBottom: 48 },
+  title: { fontSize: 40, fontWeight: 'bold', color: '#10b981', marginTop: 16 },
+  subtitle: { fontSize: 18, color: '#9ca3af', marginTop: 8 },
+  form: { gap: 16 },
+  input: { backgroundColor: '#1f2937', borderWidth: 1, borderColor: '#374151', borderRadius: 12, padding: 16, color: '#fff', fontSize: 16 },
+  button: { backgroundColor: '#10b981', borderRadius: 12, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
+  buttonDisabled: { opacity: 0.5 },
+  buttonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+  toggleButton: { alignItems: 'center', marginTop: 8 },
+  toggleText: { color: '#10b981', fontSize: 14 },
 });
-
-// ========================================
-// PASO 2: Modificar app/(tabs)/index.js
-// Añadir manejo de autenticación
-// ========================================

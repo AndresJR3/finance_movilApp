@@ -1,11 +1,4 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+// app/(tabs)/index.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -13,53 +6,80 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  StyleSheet,
   Alert,
   StatusBar,
   ActivityIndicator,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-
-
+import { supabase } from '@/lib/supabase';
+import type { Transaction, TransactionType } from '@/types';
 
 export default function HomeScreen() {
-  const [transactions, setTransactions] = useState([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
-  const [type, setType] = useState('expense');
+  const [type, setType] = useState<TransactionType>('expense');
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState<string>('');
 
-  // Cargar transacciones al iniciar
   useEffect(() => {
+    loadUserData();
     loadTransactions();
+    
+    // Suscribirse a cambios en tiempo real
+    const subscription = supabase
+      .channel('transactions_changes')
+      .on('postgres_changes', 
+        { 
+          event: '*', 
+          schema: 'public', 
+          table: 'transactions',
+        },
+        (payload) => {
+          console.log('Cambio detectado:', payload);
+          loadTransactions();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
-  // Cargar desde AsyncStorage (simula base de datos local)
+  const loadUserData = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      setUserEmail(user.email || '');
+    }
+  };
+
   const loadTransactions = async () => {
     try {
-      const stored = await AsyncStorage.getItem('transactions');
-      if (stored) {
-        setTransactions(JSON.parse(stored));
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('date', { ascending: false });
+
+      if (error) {
+        console.error('Error cargando:', error);
+        Alert.alert('Error', 'No se pudieron cargar las transacciones');
+      } else {
+        setTransactions(data || []);
       }
     } catch (error) {
-      console.error('Error cargando transacciones:', error);
+      console.error('Error de conexión:', error);
     } finally {
       setInitialLoading(false);
     }
   };
 
-  // Guardar en AsyncStorage
-  const saveToDatabase = async (newTransactions) => {
-    try {
-      await AsyncStorage.setItem('transactions', JSON.stringify(newTransactions));
-    } catch (error) {
-      console.error('Error guardando:', error);
-      Alert.alert('Error', 'No se pudo guardar la transacción');
-    }
-  };
-
-  // Añadir nueva transacción
   const addTransaction = async () => {
     if (!description.trim() || !amount || parseFloat(amount) <= 0) {
       Alert.alert('Error', 'Por favor completa todos los campos correctamente');
@@ -67,28 +87,42 @@ export default function HomeScreen() {
     }
 
     setLoading(true);
-    const newTransaction = {
-      id: Date.now().toString(),
-      description: description.trim(),
-      amount: parseFloat(amount),
-      type,
-      date: new Date().toISOString(),
-    };
 
-    const updated = [newTransaction, ...transactions];
-    setTransactions(updated);
-    await saveToDatabase(updated);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Usuario no autenticado');
 
-    // Limpiar formulario
-    setDescription('');
-    setAmount('');
-    setLoading(false);
+      const newTransaction = {
+        description: description.trim(),
+        amount: parseFloat(amount),
+        type,
+        date: new Date().toISOString(),
+        user_id: user.id,
+      };
 
-    Alert.alert('¡Éxito!', 'Transacción añadida correctamente');
+      const { data, error } = await supabase
+        .from('transactions')
+        .insert([newTransaction])
+        .select();
+
+      if (error) {
+        console.error('Error insertando:', error);
+        Alert.alert('Error', 'No se pudo guardar la transacción');
+      } else {
+        setTransactions([data[0], ...transactions]);
+        setDescription('');
+        setAmount('');
+        Alert.alert('¡Éxito!', 'Transacción guardada');
+      }
+    } catch (error) {
+      console.error('Error de red:', error);
+      Alert.alert('Error de Conexión', 'Verifica tu internet');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // Borrar transacción
-  const deleteTransaction = async (id) => {
+  const deleteTransaction = async (id: string) => {
     Alert.alert(
       'Confirmar',
       '¿Estás seguro de eliminar esta transacción?',
@@ -98,35 +132,69 @@ export default function HomeScreen() {
           text: 'Eliminar',
           style: 'destructive',
           onPress: async () => {
-            const updated = transactions.filter((t) => t.id !== id);
-            setTransactions(updated);
-            await saveToDatabase(updated);
+            try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) return;
+
+              const { error } = await supabase
+                .from('transactions')
+                .delete()
+                .eq('id', id)
+                .eq('user_id', user.id);
+
+              if (error) {
+                console.error('Error eliminando:', error);
+                Alert.alert('Error', 'No se pudo eliminar');
+              } else {
+                setTransactions(transactions.filter((t) => t.id !== id));
+              }
+            } catch (error) {
+              console.error('Error de red:', error);
+              Alert.alert('Error', 'Verifica tu conexión');
+            }
           },
         },
       ]
     );
   };
 
-  // Calcular totales
-  const calculateBalance = () => {
+  const handleSignOut = async () => {
+    Alert.alert(
+      'Cerrar Sesión',
+      '¿Estás seguro de que quieres salir?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Salir',
+          style: 'destructive',
+          onPress: async () => {
+            await supabase.auth.signOut();
+            // La redirección automática la maneja _layout.tsx
+          },
+        },
+      ]
+    );
+  };
+
+  const calculateBalance = (): number => {
     return transactions.reduce((acc, t) => {
-      return t.type === 'income' ? acc + t.amount : acc - t.amount;
+      return t.type === 'income' ? acc + Number(t.amount) : acc - Number(t.amount);
     }, 0);
   };
 
   const balance = calculateBalance();
   const totalIncome = transactions
     .filter((t) => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + Number(t.amount), 0);
   const totalExpense = transactions
     .filter((t) => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => sum + Number(t.amount), 0);
 
   if (initialLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#10b981" />
-        <Text style={styles.loadingText}>Cargando...</Text>
+        <Text style={styles.loadingText}>Cargando transacciones...</Text>
       </View>
     );
   }
@@ -135,15 +203,22 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ScrollView style={styles.scrollView}>
-        {/* Header */}
+        {/* Header con info de usuario */}
         <View style={styles.header}>
-          <View style={styles.headerTitleContainer}>
-            <Ionicons name="cash-outline" size={40} color="#10b981" />
-            <Text style={styles.headerTitle}>FinanzasApp</Text>
+          <View style={styles.headerTop}>
+            <View style={styles.headerTitleContainer}>
+              <Ionicons name="cash-outline" size={40} color="#10b981" />
+              <Text style={styles.headerTitle}>FinanzasApp</Text>
+            </View>
+            <TouchableOpacity onPress={handleSignOut} style={styles.signOutButton}>
+              <Ionicons name="log-out-outline" size={24} color="#ef4444" />
+            </TouchableOpacity>
           </View>
-          <Text style={styles.headerSubtitle}>
-            Gestiona tus finanzas con facilidad
-          </Text>
+          <Text style={styles.headerSubtitle}>{userEmail}</Text>
+          <View style={styles.statusBadge}>
+            <View style={styles.statusDot} />
+            <Text style={styles.statusText}>Sincronizado en tiempo real</Text>
+          </View>
         </View>
 
         {/* Balance Card */}
@@ -175,7 +250,6 @@ export default function HomeScreen() {
             <Text style={styles.formTitle}>Nueva Transacción</Text>
           </View>
 
-          {/* Tipo de transacción */}
           <View style={styles.typeButtonsContainer}>
             <TouchableOpacity
               style={[
@@ -211,7 +285,6 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Inputs */}
           <TextInput
             style={styles.input}
             placeholder="Descripción (ej: Supermercado)"
@@ -228,7 +301,6 @@ export default function HomeScreen() {
             keyboardType="decimal-pad"
           />
 
-          {/* Botón añadir */}
           <TouchableOpacity
             style={[styles.addButton, loading && styles.addButtonDisabled]}
             onPress={addTransaction}
@@ -238,8 +310,8 @@ export default function HomeScreen() {
               <ActivityIndicator color="#fff" />
             ) : (
               <>
-                <Ionicons name="add" size={24} color="#fff" />
-                <Text style={styles.addButtonText}>Añadir Transacción</Text>
+                <Ionicons name="cloud-upload-outline" size={24} color="#fff" />
+                <Text style={styles.addButtonText}>Guardar</Text>
               </>
             )}
           </TouchableOpacity>
@@ -247,12 +319,14 @@ export default function HomeScreen() {
 
         {/* Lista de transacciones */}
         <View style={styles.listCard}>
-          <Text style={styles.listTitle}>Historial de Transacciones</Text>
+          <Text style={styles.listTitle}>
+            Historial ({transactions.length})
+          </Text>
 
           {transactions.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="wallet-outline" size={64} color="#4b5563" />
-              <Text style={styles.emptyStateText}>No hay transacciones aún</Text>
+              <Text style={styles.emptyStateText}>No hay transacciones</Text>
               <Text style={styles.emptyStateSubtext}>
                 Añade tu primera transacción arriba
               </Text>
@@ -302,7 +376,7 @@ export default function HomeScreen() {
                     ]}
                   >
                     {transaction.type === 'income' ? '+' : '-'}$
-                    {transaction.amount.toFixed(2)}
+                    {Number(transaction.amount).toFixed(2)}
                   </Text>
                   <TouchableOpacity
                     onPress={() => deleteTransaction(transaction.id)}
@@ -317,7 +391,8 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.footer}>
-          <Text style={styles.footerText}>● Datos guardados localmente</Text>
+          <Ionicons name="shield-checkmark-outline" size={20} color="#10b981" />
+          <Text style={styles.footerText}>Datos protegidos con RLS</Text>
         </View>
       </ScrollView>
     </View>
@@ -325,253 +400,58 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#111827',
-  },
-  scrollView: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#111827',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#9ca3af',
-    marginTop: 12,
-    fontSize: 16,
-  },
-  header: {
-    paddingTop: 60,
-    paddingBottom: 24,
-    alignItems: 'center',
-  },
-  headerTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
-  },
-  headerTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#10b981',
-  },
-  headerSubtitle: {
-    color: '#9ca3af',
-    fontSize: 14,
-  },
-  balanceCard: {
-    backgroundColor: '#10b981',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 24,
-    borderRadius: 20,
-  },
-  balanceLabel: {
-    color: '#d1fae5',
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  balanceAmount: {
-    color: '#fff',
-    fontSize: 48,
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-  summaryContainer: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  summaryBox: {
-    flex: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 12,
-    borderRadius: 12,
-  },
-  summaryHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 4,
-  },
-  summaryLabel: {
-    color: '#d1fae5',
-    fontSize: 12,
-  },
-  summaryAmount: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  formCard: {
-    backgroundColor: '#1f2937',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 20,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  formHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 16,
-  },
-  formTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  typeButtonsContainer: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  typeButton: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#374151',
-    alignItems: 'center',
-  },
-  typeButtonExpenseActive: {
-    backgroundColor: '#ef4444',
-  },
-  typeButtonIncomeActive: {
-    backgroundColor: '#10b981',
-  },
-  typeButtonText: {
-    color: '#9ca3af',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  typeButtonTextActive: {
-    color: '#fff',
-  },
-  input: {
-    backgroundColor: '#374151',
-    borderWidth: 1,
-    borderColor: '#4b5563',
-    borderRadius: 12,
-    padding: 16,
-    color: '#fff',
-    fontSize: 16,
-    marginBottom: 12,
-  },
-  addButton: {
-    backgroundColor: '#10b981',
-    borderRadius: 12,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  addButtonDisabled: {
-    opacity: 0.5,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  listCard: {
-    backgroundColor: '#1f2937',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 20,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#374151',
-  },
-  listTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 16,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 48,
-  },
-  emptyStateText: {
-    color: '#9ca3af',
-    fontSize: 16,
-    marginTop: 16,
-  },
-  emptyStateSubtext: {
-    color: '#6b7280',
-    fontSize: 14,
-    marginTop: 4,
-  },
-  transactionItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#374151',
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  transactionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    gap: 12,
-  },
-  transactionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  transactionIconIncome: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-  },
-  transactionIconExpense: {
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-  },
-  transactionInfo: {
-    flex: 1,
-  },
-  transactionDescription: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  transactionDate: {
-    color: '#9ca3af',
-    fontSize: 12,
-  },
-  transactionRight: {
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  transactionAmount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  transactionAmountIncome: {
-    color: '#10b981',
-  },
-  transactionAmountExpense: {
-    color: '#ef4444',
-  },
-  deleteButton: {
-    padding: 4,
-  },
-  footer: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  footerText: {
-    color: '#10b981',
-    fontSize: 12,
-  },
+  container: { flex: 1, backgroundColor: '#111827' },
+  scrollView: { flex: 1 },
+  loadingContainer: { flex: 1, backgroundColor: '#111827', justifyContent: 'center', alignItems: 'center' },
+  loadingText: { color: '#9ca3af', marginTop: 12, fontSize: 16 },
+  header: { paddingTop: 60, paddingBottom: 24, paddingHorizontal: 16 },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  headerTitleContainer: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#10b981' },
+  signOutButton: { padding: 8 },
+  headerSubtitle: { color: '#9ca3af', fontSize: 14, marginBottom: 8 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#1f2937', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, alignSelf: 'flex-start' },
+  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10b981' },
+  statusText: { color: '#9ca3af', fontSize: 12 },
+  balanceCard: { backgroundColor: '#10b981', marginHorizontal: 16, marginBottom: 16, padding: 24, borderRadius: 20 },
+  balanceLabel: { color: '#d1fae5', fontSize: 14, marginBottom: 8 },
+  balanceAmount: { color: '#fff', fontSize: 48, fontWeight: 'bold', marginBottom: 16 },
+  summaryContainer: { flexDirection: 'row', gap: 12 },
+  summaryBox: { flex: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)', padding: 12, borderRadius: 12 },
+  summaryHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  summaryLabel: { color: '#d1fae5', fontSize: 12 },
+  summaryAmount: { color: '#fff', fontSize: 20, fontWeight: '600' },
+  formCard: { backgroundColor: '#1f2937', marginHorizontal: 16, marginBottom: 16, padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#374151' },
+  formHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 },
+  formTitle: { color: '#fff', fontSize: 20, fontWeight: '600' },
+  typeButtonsContainer: { flexDirection: 'row', gap: 8, marginBottom: 16 },
+  typeButton: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#374151', alignItems: 'center' },
+  typeButtonExpenseActive: { backgroundColor: '#ef4444' },
+  typeButtonIncomeActive: { backgroundColor: '#10b981' },
+  typeButtonText: { color: '#9ca3af', fontSize: 16, fontWeight: '600' },
+  typeButtonTextActive: { color: '#fff' },
+  input: { backgroundColor: '#374151', borderWidth: 1, borderColor: '#4b5563', borderRadius: 12, padding: 16, color: '#fff', fontSize: 16, marginBottom: 12 },
+  addButton: { backgroundColor: '#10b981', borderRadius: 12, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  addButtonDisabled: { opacity: 0.5 },
+  addButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  listCard: { backgroundColor: '#1f2937', marginHorizontal: 16, marginBottom: 16, padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#374151' },
+  listTitle: { color: '#fff', fontSize: 20, fontWeight: '600', marginBottom: 16 },
+  emptyState: { alignItems: 'center', paddingVertical: 48 },
+  emptyStateText: { color: '#9ca3af', fontSize: 16, marginTop: 16 },
+  emptyStateSubtext: { color: '#6b7280', fontSize: 14, marginTop: 4 },
+  transactionItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#374151', padding: 16, borderRadius: 12, marginBottom: 12 },
+  transactionLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 },
+  transactionIcon: { width: 48, height: 48, borderRadius: 24, justifyContent: 'center', alignItems: 'center' },
+  transactionIconIncome: { backgroundColor: 'rgba(16, 185, 129, 0.2)' },
+  transactionIconExpense: { backgroundColor: 'rgba(239, 68, 68, 0.2)' },
+  transactionInfo: { flex: 1 },
+  transactionDescription: { color: '#fff', fontSize: 16, fontWeight: '500', marginBottom: 4 },
+  transactionDate: { color: '#9ca3af', fontSize: 12 },
+  transactionRight: { alignItems: 'flex-end', gap: 8 },
+  transactionAmount: { fontSize: 18, fontWeight: 'bold' },
+  transactionAmountIncome: { color: '#10b981' },
+  transactionAmountExpense: { color: '#ef4444' },
+  deleteButton: { padding: 4 },
+  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 24 },
+  footerText: { color: '#10b981', fontSize: 12 },
 });
