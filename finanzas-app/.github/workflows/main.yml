@@ -59,7 +59,7 @@ jobs:
           
           # Esta es la llamada a la API de TestRigor
           # (¡Consulta la documentación de TestRigor para la URL y parámetros exactos!)
-          curl -X POST "https://api.testrigor.com/api/v1/apps/TU_APP_ID/retest" \
+          curl -X POST "https://api.testrigor.com/api/v1/apps/zBEpNR9X9tgaF4swH/retest" \
                -H "Authorization: Bearer ${{ secrets.TESTRIGOR_API_KEY }}" \
                -H "Content-Type: application/json" \
                -d '{ "build_url": "'"$BUILD_URL"'" }'
