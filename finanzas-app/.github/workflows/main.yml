@@ -1,0 +1,65 @@
+name: Construir y Probar App
+
+# Se activa cada vez que haces 'push' a la rama 'main'
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest # El robot usará un servidor Linux
+
+    steps:
+      # 1. Trae tu código al robot
+      - name: Revisar el código
+        uses: actions/checkout@v4
+
+      # 2. Configura Node.js
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18 # O la versión que estés usando
+
+      # 3. Configura Expo y EAS (e inicia sesión con tu token secreto)
+      - name: Configurar Expo y EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          expo-token: ${{ secrets.EXPO_TOKEN }}
+
+      # 4. Instala las dependencias (dentro de la carpeta finanzas-app)
+      - name: Instalar dependencias
+        working-directory: ./finanzas-app
+        run: npm install
+
+      # 5. Construye la app (perfil 'preview')
+      #    Nota: --non-interactive: le dice a EAS que no haga preguntas
+      #    Nota: --wait: espera a que el build termine
+      #    Nota: --json: imprime el resultado como JSON para el siguiente paso
+      - name: Construir app de Android para preview
+        working-directory: ./finanzas-app
+        run: |
+          eas build --platform android --profile preview --non-interactive --wait --json > build-output.json
+        env:
+          # Pasa los secretos de Supabase al build
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+
+      # 6. Ejecutar pruebas en TestRigor
+      - name: Lanzar pruebas de TestRigor
+        run: |
+          # Instalamos 'jq' para leer el archivo JSON
+          sudo apt-get install -y jq
+          
+          # Extraemos la URL de descarga del .apk del archivo JSON
+          # La ruta al JSON es finanzas-app/build-output.json
+          BUILD_URL=$(jq -r '.artifacts.buildUrl' finanzas-app/build-output.json)
+          
+          echo "Build URL: $BUILD_URL"
+          
+          # Esta es la llamada a la API de TestRigor
+          # (¡Consulta la documentación de TestRigor para la URL y parámetros exactos!)
+          curl -X POST "https://api.testrigor.com/api/v1/apps/TU_APP_ID/retest" \
+               -H "Authorization: Bearer ${{ secrets.TESTRIGOR_API_KEY }}" \
+               -H "Content-Type: application/json" \
+               -d '{ "build_url": "'"$BUILD_URL"'" }'
