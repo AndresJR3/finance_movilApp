@@ -57,7 +57,7 @@ jobs:
           chmod +x ./finanzas-app/scripts/run-testrigor.sh
 
           # Extraemos la URL
-          BUILD_URL=$(jq -r '.artifacts.buildUrl' finanzas-app/build-output.json)
+          BUILD_URL=$(jq -r '.[0].artifacts.buildUrl' finanzas-app/build-output.json)
           
           echo "Build generado en: $BUILD_URL"
           
