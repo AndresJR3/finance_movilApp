@@ -46,20 +46,21 @@ jobs:
           EXPO_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
 
       # 6. Ejecutar pruebas en TestRigor
-      - name: Lanzar pruebas de TestRigor
+      # ... pasos anteriores (checkout, node, eas build) ...
+
+      - name: Lanzar y esperar pruebas de TestRigor
         run: |
-          # Instalamos 'jq' para leer el archivo JSON
+          # Instalamos jq por si acaso (aunque el script bash trata de ser agnóstico)
           sudo apt-get install -y jq
           
-          # Extraemos la URL de descarga del .apk del archivo JSON
-          # La ruta al JSON es finanzas-app/build-output.json
+          # Dar permisos de ejecución al script
+          chmod +x ./finanzas-app/scripts/run-testrigor.sh
+
+          # Extraemos la URL
           BUILD_URL=$(jq -r '.artifacts.buildUrl' finanzas-app/build-output.json)
           
-          echo "Build URL: $BUILD_URL"
+          echo "Build generado en: $BUILD_URL"
           
-          # Esta es la llamada a la API de TestRigor
-          # (¡Consulta la documentación de TestRigor para la URL y parámetros exactos!)
-          curl -X POST "https://api.testrigor.com/api/v1/apps/zBEpNR9X9tgaF4swH/retest" \
-               -H "Authorization: Bearer ${{ secrets.TESTRIGOR_API_KEY }}" \
-               -H "Content-Type: application/json" \
-               -d '{ "build_url": "'"$BUILD_URL"'" }'
+          # Ejecutamos el script que creamos
+          # Pasamos: URL, Token y Suite ID
+          ./finanzas-app/scripts/run-testrigor.sh "$BUILD_URL" "${{ secrets.TESTRIGOR_API_KEY }}" "zBEpNR9X9tgaF4swH"
