@@ -18,8 +18,10 @@ dist/
 # iOS
 ios/Pods/
 ios/build/
+ios/
 
 # Android
+android/
 android/app/build/
 android/.gradle/
 
