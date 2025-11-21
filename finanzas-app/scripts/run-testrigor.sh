@@ -53,7 +53,7 @@ do
       ;;
     227|228)
       echo "⏳ Test en progreso... esperando 30 segundos."
-      sleep 30
+      sleep 25
       ;;
     229)
       echo "⚠️ Test cancelado."
