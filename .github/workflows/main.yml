@@ -25,7 +25,7 @@ jobs:
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
-          expo-token: ${{ secrets.EXPO_TOKEN }}
+          token: ${{ secrets.EXPO_TOKEN }}
 
       # 4. Instala las dependencias (dentro de la carpeta finanzas-app)
       - name: Instalar dependencias
